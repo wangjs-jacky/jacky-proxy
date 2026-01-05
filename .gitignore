@@ -1,0 +1,45 @@
+# 依赖
+node_modules/
+package-lock.json
+
+# 日志文件
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 构建输出
+dist/
+build/
+*.tsbuildinfo
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# 测试覆盖率
+coverage/
+.nyc_output/
+
+# 临时数据目录
+Raw_*/
+*.folder/
+

@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mock 场景管理</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      overflow-x: hidden;
+      box-sizing: border-box;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      padding: 30px;
+      overflow-x: hidden;
+      box-sizing: border-box;
+    }
+    .layout {
+      display: flex;
+      gap: 30px;
+      margin-top: 20px;
+      overflow-x: hidden;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .left-panel {
+      flex: 0 0 400px;
+      min-width: 0;
+      overflow-x: hidden;
+      box-sizing: border-box;
+    }
+    .right-panel {
+      flex: 1;
+      min-width: 0;
+      max-height: calc(100vh - 200px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 10px;
+      box-sizing: border-box;
+    }
+    .right-panel::-webkit-scrollbar {
+      width: 8px;
+    }
+    .right-panel::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 4px;
+    }
+    .right-panel::-webkit-scrollbar-thumb {
+      background: #888;
+      border-radius: 4px;
+    }
+    .right-panel::-webkit-scrollbar-thumb:hover {
+      background: #555;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+    .section {
+      margin-bottom: 30px;
+    }
+    .right-panel .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 18px;
+      color: #333;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
+    .scenario-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+      overflow-x: hidden;
+      box-sizing: border-box;
+    }
+    .scenario-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 15px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      transition: all 0.3s;
+      background: #f9f9f9;
+      gap: 15px;
+      width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
+      min-height: 60px;
+      height: auto;
+    }
+    .scenario-item:hover {
+      border-color: #667eea;
+      background: #f0f0ff;
+    }
+    .scenario-item.active {
+      border-color: #667eea;
+      background: #e8e8ff;
+    }
+    .scenario-info {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .scenario-name {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .scenario-label {
+      font-size: 14px;
+      color: #666;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .scenario-actions {
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+      min-width: 100px;
+    }
+    button {
+      padding: 8px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.3s;
+      font-weight: 500;
+      white-space: nowrap;
+      min-width: 80px;
+      text-align: center;
+    }
+    .btn-primary {
+      background: #667eea;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #5568d3;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    .btn-primary:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+      white-space: nowrap;
+      overflow: visible;
+    }
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #5a6268;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .status.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 10px;
+    }
+    .badge-active {
+      background: #28a745;
+      color: white;
+    }
+    @media (max-width: 1024px) {
+      .layout {
+        flex-direction: column;
+        overflow-x: hidden;
+      }
+      .left-panel {
+        flex: 1;
+        width: 100%;
+      }
+      .right-panel {
+        max-height: none;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="status"></div>
+    
+    <div class="layout">
+      <div class="left-panel">
+        <div class="section">
+          <h2 class="section-title">MockId 切换</h2>
+          <div id="mockid-info" style="margin-bottom: 15px; padding: 10px; background: #f0f0f0; border-radius: 6px;">
+            <div>当前 MockId: <strong id="current-mockid">加载中...</strong></div>
+            <div style="font-size: 12px; color: #666; margin-top: 5px;">路径: <span id="current-path">-</span></div>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <input 
+              type="text" 
+              id="mockid-search" 
+              placeholder="搜索 MockId 或路径..." 
+              style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;"
+            />
+            <div id="mockid-count" style="font-size: 12px; color: #666; margin-top: 5px;"></div>
+          </div>
+          <div id="mockids" class="scenario-list" style="max-height: calc(100vh - 400px); overflow-y: auto; padding-right: 5px;">
+            <div class="loading">加载中...</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="right-panel">
+        <div class="section">
+          <h2 class="section-title">接口场景切换</h2>
+          <div id="scenarios-container" style="width: 100%; overflow-x: hidden; box-sizing: border-box;">
+            <div class="loading">加载中...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let mockIdSearchTimeout = null;
+    
+    // 复制文本到剪贴板（优先使用 Clipboard API，降级到 execCommand）
+    async function copyToClipboard(text) {
+      if (!text) {
+        showStatus('没有可复制的路径', 'error');
+        return false;
+      }
+      
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (e) {
+        // 忽略，走降级方案
+      }
+      
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.top = '-9999px';
+        textarea.style.left = '-9999px';
+        textarea.setAttribute('readonly', '');
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+    
+    // 加载 MockId 列表
+    async function loadMockIds(search = '') {
+      try {
+        const url = search ? `/mock-admin/mockids?search=${encodeURIComponent(search)}` : '/mock-admin/mockids';
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        document.getElementById('current-mockid').textContent = data.current || '未设置';
+        
+        // 更新计数信息
+        const countDiv = document.getElementById('mockid-count');
+        if (data.total) {
+          if (search) {
+            countDiv.textContent = `显示 ${data.filtered} / ${data.total} 个配置`;
+          } else {
+            countDiv.textContent = `共 ${data.total} 个配置`;
+          }
+        }
+        
+        const container = document.getElementById('mockids');
+        container.innerHTML = '';
+        
+        if (data.available.length === 0) {
+          container.innerHTML = '<div class="status info">未找到匹配的 mockId</div>';
+          return;
+        }
+        
+        // 显示所有匹配的结果（不再限制数量）
+        data.available.forEach(mock => {
+          const isActive = data.current === mock.id;
+          const existsBadge = mock.exists ? '' : '<span style="color: #dc3545; font-size: 11px; margin-left: 5px;">(目录不存在)</span>';
+          const item = document.createElement('div');
+          item.className = 'scenario-item' + (isActive ? ' active' : '');
+          if (!mock.exists) {
+            item.style.opacity = '0.6';
+          }
+          item.innerHTML = `
+            <div class="scenario-info">
+              <div class="scenario-name">
+                MockId: ${mock.id}
+                ${isActive ? '<span class="badge badge-active">当前</span>' : ''}
+                ${existsBadge}
+              </div>
+              <div class="scenario-label">${mock.path}</div>
+            </div>
+            <div class="scenario-actions">
+              <button 
+                class="btn-primary" 
+                ${isActive || !mock.exists ? 'disabled' : ''}
+                onclick="switchMockId(${mock.id})"
+              >
+                ${isActive ? '当前使用' : (!mock.exists ? '不可用' : '切换')}
+              </button>
+            </div>
+          `;
+          container.appendChild(item);
+        });
+      } catch (error) {
+        showStatus('加载 mockId 列表失败: ' + error.message, 'error');
+      }
+    }
+    
+    // 搜索功能
+    document.addEventListener('DOMContentLoaded', function() {
+      const searchInput = document.getElementById('mockid-search');
+      if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+          const search = e.target.value.trim();
+          
+          // 防抖处理
+          clearTimeout(mockIdSearchTimeout);
+          mockIdSearchTimeout = setTimeout(() => {
+            loadMockIds(search);
+          }, 300);
+        });
+      }
+    });
+    
+    // 切换 MockId（静默操作，不显示提示）
+    async function switchMockId(mockId) {
+      try {
+        const response = await fetch(`/mock-admin/mockid/${mockId}`, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+          document.getElementById('current-mockid').textContent = data.mockId;
+          document.getElementById('current-path').textContent = data.path;
+          setTimeout(() => {
+            // 保留搜索状态
+            const searchInput = document.getElementById('mockid-search');
+            const search = searchInput ? searchInput.value.trim() : '';
+            loadMockIds(search);
+            loadScenarios();
+          }, 500);
+        }
+      } catch (error) {
+        console.error('切换 MockId 失败:', error);
+      }
+    }
+    
+    // 加载场景列表（所有接口）
+    async function loadScenarios() {
+      try {
+        const response = await fetch('/mock-admin/scenarios');
+        const data = await response.json();
+        
+        document.getElementById('current-path').textContent = data.mockPath || '-';
+        
+        const container = document.getElementById('scenarios-container');
+        container.innerHTML = '';
+        
+        const available = data.available || {};
+        if (Object.keys(available).length === 0) {
+          container.innerHTML = '<div class="status info">未找到可用的接口</div>';
+          return;
+        }
+        
+        // 按接口名排序，多场景接口放在前面
+        const sortedInterfaceNames = Object.keys(available).sort((a, b) => {
+          const aHasMultiple = available[a].hasMultipleScenarios;
+          const bHasMultiple = available[b].hasMultipleScenarios;
+          if (aHasMultiple && !bHasMultiple) return -1;
+          if (!aHasMultiple && bHasMultiple) return 1;
+          return a.localeCompare(b);
+        });
+        
+        sortedInterfaceNames.forEach(interfaceName => {
+          const interfaceData = available[interfaceName];
+          const scenarios = interfaceData.scenarios || [];
+          const isDisabled = interfaceData.disabled === true;
+          const hasMultipleScenarios = interfaceData.hasMultipleScenarios;
+          
+          // 接口项容器
+          const interfaceItem = document.createElement('div');
+          interfaceItem.style.marginBottom = '12px';
+          interfaceItem.style.backgroundColor = hasMultipleScenarios ? '#f8f9fa' : '#fff';
+          interfaceItem.style.border = '1px solid #e9ecef';
+          interfaceItem.style.borderRadius = '6px';
+          interfaceItem.style.padding = '12px';
+          interfaceItem.style.opacity = isDisabled ? '0.6' : '1';
+          interfaceItem.style.transition = 'all 0.2s';
+          interfaceItem.style.width = '100%';
+          interfaceItem.style.boxSizing = 'border-box';
+          interfaceItem.style.overflow = 'hidden';
+          
+          // 接口头部：checkbox + 接口名
+          const header = document.createElement('div');
+          header.style.display = 'flex';
+          header.style.alignItems = 'center';
+          header.style.marginBottom = hasMultipleScenarios ? '10px' : '0';
+          header.style.width = '100%';
+          header.style.boxSizing = 'border-box';
+          header.style.overflow = 'hidden';
+          
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = !isDisabled;
+          checkbox.style.marginRight = '12px';
+          checkbox.style.width = '18px';
+          checkbox.style.height = '18px';
+          checkbox.style.cursor = 'pointer';
+          checkbox.onchange = () => toggleInterface(interfaceName, checkbox.checked);
+          
+          const name = document.createElement('span');
+          name.style.fontSize = '15px';
+          name.style.fontWeight = '500';
+          name.style.color = isDisabled ? '#999' : '#212529';
+          name.style.flex = '1';
+          name.style.minWidth = '0';
+          name.style.overflow = 'hidden';
+          name.style.textOverflow = 'ellipsis';
+          name.style.whiteSpace = 'nowrap';
+          name.textContent = interfaceName;
+          
+          header.appendChild(checkbox);
+          header.appendChild(name);
+          interfaceItem.appendChild(header);
+          
+          // 如果有多个场景，全部展示出来
+          if (hasMultipleScenarios) {
+            const scenariosList = document.createElement('div');
+            scenariosList.style.marginLeft = '30px';
+            scenariosList.style.marginTop = '8px';
+            scenariosList.style.opacity = isDisabled ? '0.5' : '1';
+            scenariosList.style.width = 'calc(100% - 30px)';
+            scenariosList.style.boxSizing = 'border-box';
+            scenariosList.style.overflow = 'hidden';
+            
+            scenarios.forEach((scenario, index) => {
+              const isActive = scenario.isActive;
+              
+              const scenarioItem = document.createElement('div');
+              scenarioItem.style.display = 'flex';
+              scenarioItem.style.alignItems = 'center';
+              scenarioItem.style.padding = '8px 12px';
+              scenarioItem.style.marginBottom = index < scenarios.length - 1 ? '6px' : '0';
+              scenarioItem.style.backgroundColor = isActive ? '#e7f3ff' : '#fff';
+              scenarioItem.style.border = isActive ? '1px solid #1890ff' : '1px solid #e0e0e0';
+              scenarioItem.style.borderRadius = '4px';
+              scenarioItem.style.transition = 'all 0.2s';
+              scenarioItem.style.width = '100%';
+              scenarioItem.style.boxSizing = 'border-box';
+              scenarioItem.style.overflow = 'hidden';
+              scenarioItem.style.gap = '10px';
+              
+              if (!isDisabled) {
+                scenarioItem.onmouseover = () => {
+                  if (!isActive) {
+                    scenarioItem.style.backgroundColor = '#f5f5f5';
+                    scenarioItem.style.borderColor = '#1890ff';
+                  }
+                };
+                scenarioItem.onmouseout = () => {
+                  if (!isActive) {
+                    scenarioItem.style.backgroundColor = '#fff';
+                    scenarioItem.style.borderColor = '#e0e0e0';
+                  }
+                };
+              }
+              
+              const scenarioName = document.createElement('span');
+              scenarioName.style.fontSize = '13px';
+              scenarioName.style.fontFamily = 'monospace';
+              scenarioName.style.color = isActive ? '#1890ff' : '#495057';
+              scenarioName.style.flex = '1';
+              scenarioName.style.minWidth = '0';
+              scenarioName.style.overflow = 'hidden';
+              scenarioName.style.textOverflow = 'ellipsis';
+              scenarioName.style.whiteSpace = 'nowrap';
+              scenarioName.textContent = scenario.name;
+              
+              if (isActive) {
+                const activeBadge = document.createElement('span');
+                activeBadge.textContent = '✓';
+                activeBadge.style.marginLeft = '8px';
+                activeBadge.style.color = '#1890ff';
+                activeBadge.style.fontWeight = 'bold';
+                scenarioName.appendChild(activeBadge);
+              }
+              
+              const switchBtn = document.createElement('button');
+              switchBtn.textContent = isActive ? '当前' : '切换';
+              switchBtn.style.padding = '6px 16px';
+              switchBtn.style.fontSize = '12px';
+              switchBtn.style.border = '1px solid #1890ff';
+              switchBtn.style.borderRadius = '4px';
+              switchBtn.style.backgroundColor = isActive ? '#1890ff' : '#fff';
+              switchBtn.style.color = isActive ? '#fff' : '#1890ff';
+              switchBtn.style.cursor = isActive || isDisabled ? 'not-allowed' : 'pointer';
+              switchBtn.style.fontWeight = '500';
+              switchBtn.style.transition = 'all 0.2s';
+              switchBtn.disabled = isActive || isDisabled;
+              
+              if (!isActive && !isDisabled) {
+                switchBtn.onmouseover = () => {
+                  switchBtn.style.backgroundColor = '#1890ff';
+                  switchBtn.style.color = '#fff';
+                };
+                switchBtn.onmouseout = () => {
+                  switchBtn.style.backgroundColor = '#fff';
+                  switchBtn.style.color = '#1890ff';
+                };
+              }
+              
+              if (isActive || isDisabled) {
+                switchBtn.style.opacity = '0.6';
+              }
+              
+              switchBtn.onclick = () => {
+                if (!isActive && !isDisabled) {
+                  switchScenario(interfaceName, scenario.id);
+                }
+              };
+              
+              // 拷贝本地文件路径按钮
+              const copyBtn = document.createElement('button');
+              copyBtn.textContent = '拷贝路径';
+              copyBtn.title = scenario.filePath ? scenario.filePath : '无可用本地路径';
+              copyBtn.style.padding = '6px 12px';
+              copyBtn.style.fontSize = '12px';
+              copyBtn.style.border = '1px solid #6c757d';
+              copyBtn.style.borderRadius = '4px';
+              copyBtn.style.backgroundColor = '#fff';
+              copyBtn.style.color = '#6c757d';
+              copyBtn.style.cursor = (!scenario.filePath || isDisabled) ? 'not-allowed' : 'pointer';
+              copyBtn.style.fontWeight = '500';
+              copyBtn.style.transition = 'all 0.2s';
+              copyBtn.disabled = (!scenario.filePath) || isDisabled;
+              
+              if (!copyBtn.disabled) {
+                copyBtn.onmouseover = () => {
+                  copyBtn.style.backgroundColor = '#6c757d';
+                  copyBtn.style.color = '#fff';
+                };
+                copyBtn.onmouseout = () => {
+                  copyBtn.style.backgroundColor = '#fff';
+                  copyBtn.style.color = '#6c757d';
+                };
+              } else {
+                copyBtn.style.opacity = '0.6';
+              }
+              
+              copyBtn.onclick = async () => {
+                if (copyBtn.disabled) return;
+                const ok = await copyToClipboard(scenario.filePath);
+                if (ok) {
+                  // 复制成功：不展示顶部提示栏，改为按钮自身短暂反馈
+                  const oldText = copyBtn.textContent;
+                  const oldBg = copyBtn.style.backgroundColor;
+                  const oldColor = copyBtn.style.color;
+                  copyBtn.textContent = '已复制';
+                  copyBtn.style.backgroundColor = '#28a745';
+                  copyBtn.style.color = '#fff';
+                  copyBtn.disabled = true;
+                  setTimeout(() => {
+                    copyBtn.textContent = oldText;
+                    copyBtn.style.backgroundColor = oldBg || '#fff';
+                    copyBtn.style.color = oldColor || '#6c757d';
+                    copyBtn.disabled = false;
+                  }, 1200);
+                } else {
+                  showStatus('拷贝失败：请检查浏览器权限或使用 HTTPS/localhost', 'error');
+                }
+              };
+              
+              scenarioItem.appendChild(scenarioName);
+              scenarioItem.appendChild(copyBtn);
+              scenarioItem.appendChild(switchBtn);
+              scenariosList.appendChild(scenarioItem);
+            });
+            
+            interfaceItem.appendChild(scenariosList);
+          }
+          
+          container.appendChild(interfaceItem);
+        });
+      } catch (error) {
+        showStatus('加载场景列表失败: ' + error.message, 'error');
+      }
+    }
+    
+    // 切换接口启用/禁用状态（静默操作，不显示提示）
+    async function toggleInterface(interfaceName, enabled) {
+      try {
+        const response = await fetch(`/mock-admin/interfaces/${interfaceName}/toggle`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          // 静默更新，不显示提示
+          setTimeout(() => {
+            loadScenarios();
+          }, 100);
+        }
+      } catch (error) {
+        console.error('切换接口状态失败:', error);
+      }
+    }
+    
+    // 切换场景（静默操作，不显示提示）
+    async function switchScenario(interfaceName, scenarioId) {
+      const scenario = scenarioId === 'default' ? null : scenarioId;
+      
+      try {
+        const response = await fetch(`/mock-admin/scenarios/${interfaceName}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scenario })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          // 静默更新，不显示提示
+          setTimeout(() => {
+            loadScenarios();
+          }, 200);
+        }
+      } catch (error) {
+        console.error('切换场景失败:', error);
+      }
+    }
+    
+    // 显示状态消息
+    function showStatus(message, type = 'info') {
+      const statusDiv = document.getElementById('status');
+      statusDiv.className = 'status ' + type;
+      statusDiv.textContent = message;
+      statusDiv.style.display = 'block';
+      
+      if (type === 'success' || type === 'error') {
+        setTimeout(() => {
+          statusDiv.style.display = 'none';
+        }, 3000);
+      }
+    }
+    
+    // 页面加载时获取数据
+    loadMockIds();
+    loadScenarios();
+    
+    // 每5秒自动刷新一次（保留搜索状态）
+    setInterval(() => {
+      const mockIdSearchInput = document.getElementById('mockid-search');
+      const mockIdSearch = mockIdSearchInput ? mockIdSearchInput.value.trim() : '';
+      loadMockIds(mockIdSearch);
+      loadScenarios();
+    }, 5000);
+  </script>
+</body>
+</html>
+

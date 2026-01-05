@@ -1,0 +1,64 @@
+{
+  "name": "jacky-proxy",
+  "version": "1.0.0",
+  "description": "通用 Mock 服务器 - 适用于任意网站的 HTTP 请求拦截和 Mock 响应系统",
+  "main": "server.js",
+  "bin": {
+    "jacky-proxy": "./bin/jacky-proxy.js"
+  },
+  "scripts": {
+    "start": "npm run config:generate && node server.js",
+    "dev": "nodemon server.js",
+    "config:generate": "node scripts/generate-config.js generate",
+    "config:validate": "node scripts/generate-config.js validate",
+    "config:merge": "node scripts/generate-config.js merge",
+    "migrate": "jacky-proxy migrate",
+    "cli": "node bin/jacky-proxy.js"
+  },
+  "keywords": [
+    "mock",
+    "proxy",
+    "express",
+    "api-mock",
+    "http-proxy",
+    "mock-server",
+    "api-testing",
+    "proxyman"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wangjs-jacky/jacky-proxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wangjs-jacky/jacky-proxy/issues"
+  },
+  "homepage": "https://github.com/wangjs-jacky/jacky-proxy#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "server.js",
+    "scripts/",
+    "utils/",
+    "templates/",
+    "tsconfig.json",
+    "README.md"
+  ],
+  "dependencies": {
+    "commander": "^14.0.2",
+    "express": "^4.18.2",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/lodash": "^4.14.202",
+    "@types/node": "^20.10.0",
+    "nodemon": "^3.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
