@@ -310,6 +310,39 @@ export function formatDiffInfo(diffs: DiffInfo[]): string {
 }
 
 /**
+ * 规范化 query 参数中的数组值
+ * Express 会将同名 query 参数解析为数组（如 ?preview=&preview=0 -> ["", "0"]）
+ * 为了匹配，需要将数组转换为字符串：取最后一个非空值，或如果都是空字符串则取最后一个值
+ */
+function normalizeQueryArrayValues(obj: any): any {
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => normalizeQueryArrayValues(item));
+  }
+
+  const result: any = {};
+  for (const key in obj) {
+    const value = obj[key];
+    if (Array.isArray(value)) {
+      // 如果是数组，取最后一个非空值，或如果都是空字符串则取最后一个值
+      const nonEmptyValues = value.filter(v => v !== '' && v !== null && v !== undefined);
+      result[key] = nonEmptyValues.length > 0 
+        ? nonEmptyValues[nonEmptyValues.length - 1] 
+        : value[value.length - 1];
+    } else if (typeof value === 'object' && value !== null) {
+      // 递归处理嵌套对象
+      result[key] = normalizeQueryArrayValues(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
  * 处理请求对象（应用忽略、排序等规则）
  */
 function processRequest(
@@ -352,6 +385,34 @@ function processRequest(
     }
 
     processed.body = body;
+  }
+
+  // 处理 query 参数（GET 请求通常使用 query 参数）
+  // 如果请求没有 body，query 参数也会参与匹配
+  if (processed.query && typeof processed.query === 'object') {
+    let query = { ...processed.query };
+
+    // 规范化数组值（Express 会将同名 query 参数解析为数组）
+    query = normalizeQueryArrayValues(query);
+
+    // 深度忽略属性
+    if (deepIgnore) {
+      query = deepIgnoreProps(query, ignoreProps);
+    } else {
+      // 浅层忽略属性
+      for (const prop of ignoreProps) {
+        if (!essentialProps.includes(prop)) {
+          delete query[prop];
+        }
+      }
+    }
+
+    // 排序数组属性
+    if (sortProps.length > 0) {
+      query = sortArrayProps(query, sortProps);
+    }
+
+    processed.query = query;
   }
 
   return processed;
@@ -399,6 +460,15 @@ export function matchResponse(
 
   const finalSortProps = interfaceConfig?.sortProps || sortProps;
 
+  // 先提取原始请求数据（在过滤之前），用于后续比较
+  // 优先级：body > query
+  let originalRequestData: any;
+  if (request.body !== undefined && request.body !== null && request.body !== '') {
+    originalRequestData = request.body;
+  } else if (request.query && typeof request.query === 'object' && Object.keys(request.query).length > 0) {
+    originalRequestData = request.query;
+  }
+
   // 处理真实请求
   let processedRequest = processRequest(
     request,
@@ -418,10 +488,50 @@ export function matchResponse(
   }
 
   // 提取实际请求的 body 部分用于比较
-  // 如果请求有 body 字段，则使用 body；否则使用整个请求对象
-  let requestBodyForCompare = processedRequest.body !== undefined 
-    ? processedRequest.body 
-    : processedRequest;
+  // 优先级：body > query > 整个请求对象
+  // GET 请求通常使用 query 参数，POST 请求使用 body
+  let requestBodyForCompare: any;
+  
+  // 检查 body 是否存在且不为空
+  const hasBody = processedRequest.body !== undefined && 
+                  processedRequest.body !== null && 
+                  processedRequest.body !== '' &&
+                  (typeof processedRequest.body !== 'object' || Object.keys(processedRequest.body).length > 0);
+  
+  // 检查 query 是否存在且不为空
+  const hasQuery = processedRequest.query && 
+                   typeof processedRequest.query === 'object' && 
+                   Object.keys(processedRequest.query).length > 0;
+  
+  if (hasBody) {
+    requestBodyForCompare = processedRequest.body;
+  } else if (hasQuery) {
+    // GET 请求：使用 query 参数（已经在 processRequest 中规范化了数组值）
+    requestBodyForCompare = processedRequest.query;
+  } else if (originalRequestData) {
+    // 如果过滤后都为空，使用原始数据（但需要应用过滤规则）
+    // 先规范化数组值
+    let normalizedData = normalizeQueryArrayValues(originalRequestData);
+    
+    // 对原始数据应用过滤规则
+    if (finalDeepIgnore) {
+      requestBodyForCompare = deepIgnoreProps(normalizedData, ignoreProps);
+    } else {
+      requestBodyForCompare = { ...normalizedData };
+      for (const prop of ignoreProps) {
+        if (!essentialProps.includes(prop)) {
+          delete requestBodyForCompare[prop];
+        }
+      }
+    }
+    // 应用排序
+    if (finalSortProps.length > 0) {
+      requestBodyForCompare = sortArrayProps(requestBodyForCompare, finalSortProps);
+    }
+  } else {
+    // 最后兜底：使用处理后的请求对象（可能包含其他字段）
+    requestBodyForCompare = processedRequest;
+  }
 
   // 检查必需属性
   if (needContainProps.length > 0) {
@@ -438,6 +548,9 @@ export function matchResponse(
   }
 
   // 遍历 Mock 请求列表，找到匹配的请求
+  // 同时保存处理后的 mock 请求，用于错误信息显示
+  const processedMockRequests: any[] = [];
+  
   for (let i = 0; i < requestList.length; i++) {
     const mockRequest = requestList[i];
     
@@ -455,9 +568,46 @@ export function matchResponse(
     );
 
     // 提取 mock 请求的 body 部分用于比较
-    let mockBodyForCompare = processedMockRequest.body !== undefined 
-      ? processedMockRequest.body 
-      : processedMockRequest;
+    // 优先级：body > query > 整个请求对象（与真实请求保持一致）
+    let mockBodyForCompare: any;
+    
+    // 检查 body 是否存在且不为空
+    const hasMockBody = processedMockRequest.body !== undefined && 
+                        processedMockRequest.body !== null && 
+                        processedMockRequest.body !== '' &&
+                        (typeof processedMockRequest.body !== 'object' || Object.keys(processedMockRequest.body).length > 0);
+    
+    // 检查 query 是否存在且不为空
+    const hasMockQuery = processedMockRequest.query && 
+                         typeof processedMockRequest.query === 'object' && 
+                         Object.keys(processedMockRequest.query).length > 0;
+    
+    if (hasMockBody) {
+      mockBodyForCompare = processedMockRequest.body;
+    } else if (hasMockQuery) {
+      // GET 请求：使用 query 参数
+      mockBodyForCompare = processedMockRequest.query;
+    } else {
+      // 兜底：Mock 请求通常是纯对象格式（没有 body/query 字段）
+      // 如果 processedRequest.body 存在但为空对象，说明原始 mockRequest 被包装成了 { body: mockRequest }
+      // 此时应该使用原始 mockRequest（但需要应用相同的过滤规则）
+      // 由于 mockRequest 是纯对象，它已经被包装为 { body: mockRequest } 并处理过了
+      // 如果 body 是空对象，说明所有属性都被过滤了，但原始 mockRequest 可能还有数据
+      // 这里需要重新处理原始 mockRequest，应用相同的过滤规则
+      if (mockRequest && typeof mockRequest === 'object' && !mockRequest.body && !mockRequest.query) {
+        // 纯对象格式，需要重新处理（应用过滤规则）
+        // 创建一个临时对象来应用过滤规则
+        const tempRequest = { body: mockRequest };
+        const tempProcessed = processRequest(tempRequest, ignoreProps, essentialProps, finalDeepIgnore, finalSortProps);
+        mockBodyForCompare = tempProcessed.body || mockRequest;
+      } else {
+        // 使用处理后的请求对象
+        mockBodyForCompare = processedMockRequest;
+      }
+    }
+
+    // 保存处理后的 mock 请求（已去除忽略的属性），用于错误信息显示
+    processedMockRequests.push(mockBodyForCompare);
 
     // 使用 lodash 的 isEqualWith 进行深度比较（只比较 body 部分）
     const isMatch = _.isEqualWith(
@@ -477,12 +627,13 @@ export function matchResponse(
 
   // 没有找到匹配的请求，返回错误信息
   // 注意：详细差异信息不再打印到控制台，避免终端输出过多信息
+  // 错误信息中的 request 和 mockRequests 都已去除忽略的属性，便于对比
 
   return {
     error: true,
     message: '未找到匹配的 Mock 请求',
     request: JSON.stringify(requestBodyForCompare),
-    mockRequests: JSON.stringify(requestList.map((req, index) => ({
+    mockRequests: JSON.stringify(processedMockRequests.map((req, index) => ({
       index,
       request: req
     })))

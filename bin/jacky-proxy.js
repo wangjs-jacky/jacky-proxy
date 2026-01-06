@@ -38,7 +38,7 @@ program
   .option('-p, --port <port>', '监听端口', '5000')
   .option('-m, --mock-id <id>', '接口集 ID（如果未在命令中指定）')
   .option('-c, --config <path>', '配置文件路径', 'proxy.config.json')
-  .option('-s, --scenario <name>', '场景名称（当启动 Raw 文件夹时使用）', '场景1')
+  .option('-s, --scenario <name>', '场景名称（当启动 Raw 文件夹时使用）', '默认场景')
   .option('-t, --target <path>', '目标文件夹路径（当启动 Raw 文件夹时使用）', 'mocks/test-folder')
   .option('--ignore <interfaces>', '要忽略的接口（逗号分隔，当启动 Raw 文件夹时使用）', '')
   .option('--no-migrate', '不自动迁移，直接启动（如果指定的是 Raw 文件夹）')
@@ -131,6 +131,75 @@ rulesCommand
     const rulesTestCommand = require('../src/commands/rules-test');
     await rulesTestCommand(options);
   });
+
+// 在解析之前，检查第一个参数是否是 Raw 文件夹路径
+// 如果是，自动调用 start 命令
+const args = process.argv.slice(2);
+if (args.length > 0) {
+  const firstArg = args[0];
+  const fs = require('fs');
+  const path = require('path');
+  
+  // 检查是否是已知命令
+  const knownCommands = ['migrate', 'start', 'config', 'rules'];
+  const isKnownCommand = knownCommands.includes(firstArg);
+  
+  // 如果不是已知命令，检查是否是 Raw 文件夹路径
+  if (!isKnownCommand) {
+    // 规范化路径，确保正确处理相对路径（包括 ./ 开头的路径）
+    const fullPath = path.isAbsolute(firstArg) 
+      ? path.resolve(firstArg)
+      : path.resolve(process.cwd(), firstArg);
+    
+    // 检查是否是 Raw 文件夹路径：路径必须以 .folder 结尾，且路径存在且是目录
+    const isRawFolderPath = (firstArg.endsWith('.folder') || path.basename(fullPath).endsWith('.folder')) &&
+      fs.existsSync(fullPath) && 
+      fs.statSync(fullPath).isDirectory();
+    
+    if (isRawFolderPath) {
+      // 将路径作为 start 命令的参数（使用规范化后的路径）
+      const startCommand = require('../src/commands/start');
+      const startOptions = {};
+      
+      // 解析其他选项（使用 commander 的选项解析逻辑）
+      for (let i = 1; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '--port' || arg === '-p') {
+          startOptions.port = args[++i];
+        } else if (arg === '--scenario' || arg === '-s') {
+          startOptions.scenario = args[++i];
+        } else if (arg === '--target' || arg === '-t') {
+          startOptions.target = args[++i];
+        } else if (arg === '--ignore') {
+          startOptions.ignore = args[++i];
+        } else if (arg === '--debug') {
+          startOptions.debug = true;
+        } else if (arg === '--no-migrate') {
+          startOptions.noMigrate = true;
+        } else if (arg === '--config' || arg === '-c') {
+          startOptions.config = args[++i];
+        } else if (arg.startsWith('--port=')) {
+          startOptions.port = arg.split('=')[1];
+        } else if (arg.startsWith('--scenario=')) {
+          startOptions.scenario = arg.split('=')[1];
+        } else if (arg.startsWith('--target=')) {
+          startOptions.target = arg.split('=')[1];
+        } else if (arg.startsWith('--ignore=')) {
+          startOptions.ignore = arg.split('=')[1];
+        } else if (arg.startsWith('--config=')) {
+          startOptions.config = arg.split('=')[1];
+        }
+      }
+      
+      // 调用 start 命令，传递原始参数（startCommand 内部会再次解析）
+      startCommand(firstArg, startOptions).catch((error) => {
+        console.error('启动失败:', error);
+        process.exit(1);
+      });
+      return;
+    }
+  }
+}
 
 // 解析命令行参数
 program.parse();

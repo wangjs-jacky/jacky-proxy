@@ -39,30 +39,194 @@ const SOA_FILE_PATTERN = /.*soa2_\d+_\w+\.txt$/;
 const SOA_EXTRACT_PATTERN = /soa2_(\d+)_(\w+)/;
 const INDEX_PATTERN = /^\[(\d+)\]\s+(Request|Response)/;
 
+// Proxyman 标准格式文件模式
+const PROXYMAN_FILE_PATTERN = /^\[\d+\]\s+(Request|Response)\s+-\s+.+\.txt$/;
+const PROXYMAN_EXTRACT_PATTERN = /^\[(\d+)\]\s+(Request|Response)\s+-\s+(.+?)\.txt$/;
+
 /**
  * 从文件中提取 JSON 数据
+ * 支持 Request 和 Response 文件
  */
 function extractJsonFromFile(filePath) {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const lines = content.split('\n');
+    const filename = path.basename(filePath);
 
+    // 判断是 Request 还是 Response 文件
+    const isRequest = filename.includes('Request');
+    const isResponse = filename.includes('Response');
+
+    // 对于 Request 文件，检查是否是 GET 请求（没有 body）
+    if (isRequest) {
+      const firstLine = lines[0] || '';
+      const methodMatch = firstLine.match(/^(GET|POST|PUT|DELETE|PATCH)\s+/);
+      
+      if (methodMatch) {
+        const method = methodMatch[1];
+        
+        // GET 请求通常没有 body，从 URL query 参数中提取
+        if (method === 'GET') {
+          const urlMatch = firstLine.match(/\s+([^\s?]+)\??([^\s]*)/);
+          if (urlMatch) {
+            const queryString = urlMatch[2];
+            if (queryString) {
+              // 解析 query 参数
+              const params = {};
+              queryString.split('&').forEach(param => {
+                const [key, value] = param.split('=');
+                if (key) {
+                  try {
+                    params[key] = value ? decodeURIComponent(value) : '';
+                  } catch (e) {
+                    params[key] = value || '';
+                  }
+                }
+              });
+              return Object.keys(params).length > 0 ? params : {};
+            }
+          }
+          // GET 请求没有 query 参数，返回空对象
+          return {};
+        }
+        
+        // POST/PUT/DELETE/PATCH 请求，尝试从 body 中提取 JSON
+        // 找到第一个空行后的第一个 {
+        let jsonStartIndex = -1;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trim() === '' && i + 1 < lines.length) {
+            const nextLine = lines[i + 1].trim();
+            if (nextLine.startsWith('{') || nextLine.startsWith('[')) {
+              jsonStartIndex = i + 1;
+              break;
+            }
+          }
+        }
+
+        // 如果没找到空行，直接找第一个 { 或 [
+        if (jsonStartIndex === -1) {
+          for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+              jsonStartIndex = i;
+              break;
+            }
+          }
+        }
+
+        if (jsonStartIndex === -1) {
+          // POST/PUT/DELETE/PATCH 请求没有 body，返回空对象
+          return {};
+        }
+
+        // 从 jsonStartIndex 开始提取 JSON
+        const jsonContent = lines.slice(jsonStartIndex).join('\n').trim();
+
+        // 验证 JSON 格式
+        try {
+          return JSON.parse(jsonContent);
+        } catch (e) {
+          console.error(`错误: 文件 ${filePath} 的 JSON 格式无效:`, e.message);
+          return {};
+        }
+      } else {
+        // Request 文件但无法识别 HTTP 方法，尝试通用提取
+        // 找到第一个空行后的第一个 {
+        let jsonStartIndex = -1;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trim() === '' && i + 1 < lines.length) {
+            const nextLine = lines[i + 1].trim();
+            if (nextLine.startsWith('{') || nextLine.startsWith('[')) {
+              jsonStartIndex = i + 1;
+              break;
+            }
+          }
+        }
+
+        if (jsonStartIndex === -1) {
+          for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+              jsonStartIndex = i;
+              break;
+            }
+          }
+        }
+
+        if (jsonStartIndex === -1) {
+          // 无法提取，返回空对象
+          return {};
+        }
+
+        const jsonContent = lines.slice(jsonStartIndex).join('\n').trim();
+        try {
+          return JSON.parse(jsonContent);
+        } catch (e) {
+          return {};
+        }
+      }
+    }
+
+    // 对于 Response 文件，提取 JSON body
+    if (isResponse) {
+      // 找到第一个空行后的第一个 {
+      let jsonStartIndex = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === '' && i + 1 < lines.length) {
+          const nextLine = lines[i + 1].trim();
+          if (nextLine.startsWith('{') || nextLine.startsWith('[')) {
+            jsonStartIndex = i + 1;
+            break;
+          }
+        }
+      }
+
+      // 如果没找到空行，直接找第一个 { 或 [
+      if (jsonStartIndex === -1) {
+        for (let i = 0; i < lines.length; i++) {
+          const trimmed = lines[i].trim();
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            jsonStartIndex = i;
+            break;
+          }
+        }
+      }
+
+      if (jsonStartIndex === -1) {
+        console.warn(`警告: 在文件 ${filePath} 中未找到 JSON 数据`);
+        return null;
+      }
+
+      // 从 jsonStartIndex 开始提取 JSON
+      const jsonContent = lines.slice(jsonStartIndex).join('\n').trim();
+
+      // 验证 JSON 格式
+      try {
+        return JSON.parse(jsonContent);
+      } catch (e) {
+        console.error(`错误: 文件 ${filePath} 的 JSON 格式无效:`, e.message);
+        return null;
+      }
+    }
+
+    // 如果无法判断文件类型，使用原来的逻辑
     // 找到第一个空行后的第一个 {
     let jsonStartIndex = -1;
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].trim() === '' && i + 1 < lines.length) {
         const nextLine = lines[i + 1].trim();
-        if (nextLine.startsWith('{')) {
+        if (nextLine.startsWith('{') || nextLine.startsWith('[')) {
           jsonStartIndex = i + 1;
           break;
         }
       }
     }
 
-    // 如果没找到空行，直接找第一个 {
+    // 如果没找到空行，直接找第一个 { 或 [
     if (jsonStartIndex === -1) {
       for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim().startsWith('{')) {
+        const trimmed = lines[i].trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           jsonStartIndex = i;
           break;
         }
@@ -92,8 +256,12 @@ function extractJsonFromFile(filePath) {
 
 /**
  * 从文件名中提取接口信息
+ * 支持两种格式：
+ * 1. SOA2 格式: soa2_数字_接口名.txt
+ * 2. Proxyman 格式: [序号] Request/Response - 域名_路径.txt
  */
-function extractInterfaceInfo(filename) {
+function extractInterfaceInfo(filePath) {
+  const filename = path.basename(filePath);
   const indexMatch = filename.match(INDEX_PATTERN);
   if (!indexMatch) {
     return null;
@@ -102,48 +270,166 @@ function extractInterfaceInfo(filename) {
   const index = parseInt(indexMatch[1], 10);
   const type = indexMatch[2].toLowerCase();
 
+  // 尝试 SOA2 格式
   const soaMatch = filename.match(SOA_EXTRACT_PATTERN);
-  if (!soaMatch) {
-    return null;
+  if (soaMatch) {
+    const interfaceId = soaMatch[1];
+    let interfaceName = soaMatch[2];
+    
+    if (interfaceName.startsWith('json_')) {
+      interfaceName = interfaceName.substring(5);
+    }
+
+    return { index, type, interfaceId, interfaceName };
   }
 
-  const interfaceId = soaMatch[1];
-  let interfaceName = soaMatch[2];
-  
-  if (interfaceName.startsWith('json_')) {
-    interfaceName = interfaceName.substring(5);
+  // 尝试 Proxyman 格式或其他通用格式
+  const proxymanMatch = filename.match(PROXYMAN_EXTRACT_PATTERN);
+  if (proxymanMatch) {
+    // 从文件名中提取路径部分（域名_路径）
+    const pathPart = proxymanMatch[3];
+    
+    // 尝试从请求文件中读取 URL 路径来提取接口名（更准确）
+    let interfaceName = null;
+    
+    // 对于 Request 文件，直接从文件内容提取
+    if (type === 'request' && fs.existsSync(filePath)) {
+      interfaceName = extractInterfaceNameFromRequestFile(filePath);
+    }
+    
+    // 对于 Response 文件，尝试找到对应的 Request 文件来提取接口名
+    if (!interfaceName && type === 'response') {
+      // 查找对应的 Request 文件（相同序号）
+      const requestFileName = filename.replace('Response', 'Request');
+      const requestFilePath = path.join(path.dirname(filePath), requestFileName);
+      if (fs.existsSync(requestFilePath)) {
+        interfaceName = extractInterfaceNameFromRequestFile(requestFilePath);
+      }
+    }
+    
+    // 如果从文件内容中无法提取，则从文件名中提取
+    if (!interfaceName) {
+      // 从文件名中提取路径部分（域名_路径）
+      // 例如: www.klook.cn_v1_experiencesrv_activity_package_service_get_activity_right_price_sources
+      // -> get_activity_right_price_sources
+      const parts = pathPart.split('_');
+      
+      // 查找包含 "service" 或 "api" 的部分，取后面的部分
+      const serviceIndex = parts.findIndex(p => p.includes('service') || p.includes('api'));
+      if (serviceIndex !== -1 && serviceIndex < parts.length - 1) {
+        interfaceName = parts.slice(serviceIndex + 1).join('_');
+      } else if (parts.length > 3) {
+        // 如果路径较长，取最后几部分作为接口名
+        interfaceName = parts.slice(-3).join('_');
+      } else {
+        // 默认取最后一部分
+        interfaceName = parts[parts.length - 1];
+      }
+    }
+
+    return { index, type, interfaceId: null, interfaceName };
   }
 
-  return { index, type, interfaceId, interfaceName };
+  // 如果都不匹配，但文件名符合 [序号] Request/Response 格式，尝试通用提取
+  // 这可以处理其他格式，只要文件名包含 [序号] Request/Response
+  if (indexMatch) {
+    // 尝试从文件内容中提取接口名
+    let interfaceName = null;
+    
+    if (type === 'request' && fs.existsSync(filePath)) {
+      interfaceName = extractInterfaceNameFromRequestFile(filePath);
+    } else if (type === 'response') {
+      // 对于 Response 文件，尝试找到对应的 Request 文件
+      const requestFileName = filename.replace('Response', 'Request');
+      const requestFilePath = path.join(path.dirname(filePath), requestFileName);
+      if (fs.existsSync(requestFilePath)) {
+        interfaceName = extractInterfaceNameFromRequestFile(requestFilePath);
+      }
+    }
+    
+    // 如果无法从文件内容提取，尝试从文件名中提取（去掉序号和类型后的部分）
+    if (!interfaceName) {
+      // 移除 [序号] Request/Response - 前缀，取剩余部分作为接口名
+      const remaining = filename
+        .replace(INDEX_PATTERN, '')
+        .replace(/^\s*-\s*/, '')
+        .replace(/\.txt$/, '')
+        .trim();
+      
+      if (remaining) {
+        // 如果剩余部分包含路径，提取最后一部分
+        const parts = remaining.split(/[_\-\/]/).filter(p => p);
+        if (parts.length > 0) {
+          interfaceName = parts[parts.length - 1];
+        }
+      }
+    }
+    
+    if (interfaceName) {
+      return { index, type, interfaceId: null, interfaceName };
+    }
+  }
+
+  return null;
 }
 
 /**
- * 扫描 Raw 文件夹，提取所有 SOA2 接口文件
+ * 从请求文件中提取接口名
+ */
+function extractInterfaceNameFromRequestFile(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const firstLine = content.split('\n')[0];
+    // 匹配 HTTP 请求行，例如: GET /v1/experiencesrv/activity/package_service/get_activity_right_price_sources?...
+    const urlMatch = firstLine.match(/^(GET|POST|PUT|DELETE|PATCH)\s+([^\s?]+)/);
+    if (urlMatch) {
+      const urlPath = urlMatch[2];
+      // 从路径中提取接口名：取最后一个斜杠后的部分
+      const pathParts = urlPath.split('/').filter(p => p);
+      if (pathParts.length > 0) {
+        return pathParts[pathParts.length - 1];
+      }
+    }
+  } catch (e) {
+    // 如果读取失败，返回 null
+  }
+  return null;
+}
+
+/**
+ * 扫描 Raw 文件夹，提取所有接口文件
+ * 支持多种格式：
+ * 1. SOA2 格式: soa2_数字_接口名.txt（必须包含 [序号] Request/Response）
+ * 2. Proxyman 标准格式: [序号] Request/Response - 域名_路径.txt
+ * 3. 通用格式: [序号] Request/Response - 任意内容.txt（会尝试从文件内容提取接口名）
  */
 function scanRawFolder(rawFolderPath) {
   const files = fs.readdirSync(rawFolderPath);
-  const soaFiles = [];
+  const interfaceFiles = [];
 
   for (const file of files) {
-    if (!SOA_FILE_PATTERN.test(file)) {
+    // 检查文件名是否包含 [序号] Request/Response 格式
+    // 这是最通用的格式要求，可以匹配多种文件命名方式
+    if (!INDEX_PATTERN.test(file)) {
       continue;
     }
 
-    const info = extractInterfaceInfo(file);
+    const filePath = path.join(rawFolderPath, file);
+    const info = extractInterfaceInfo(filePath);
     if (!info) {
-      console.warn(`警告: 无法解析文件 ${file}`);
+      console.warn(`警告: 无法解析文件 ${file}（文件名需包含 [序号] Request/Response 格式）`);
       continue;
     }
 
-    soaFiles.push({
+    interfaceFiles.push({
       index: info.index,
       type: info.type,
       interfaceName: info.interfaceName,
-      filePath: path.join(rawFolderPath, file),
+      filePath: filePath,
     });
   }
 
-  return soaFiles;
+  return interfaceFiles;
 }
 
 /**
@@ -641,10 +927,14 @@ async function executeMigration(scenarioName, targetFolder, rawFolderPath, rl = 
 
   console.log('扫描 Raw 文件夹...');
   const files = scanRawFolder(rawFolderPath);
-  console.log(`找到 ${files.length} 个 SOA2 接口文件`);
+  console.log(`找到 ${files.length} 个接口文件`);
 
   if (files.length === 0) {
-    console.error('错误: 未找到任何 SOA2 接口文件');
+    console.error('错误: 未找到任何接口文件');
+    console.error('提示: 文件名需包含 [序号] Request/Response 格式，例如:');
+    console.error('  - [1] Request - api.example.com_get_user_info.txt');
+    console.error('  - [1] Response - api.example.com_get_user_info.txt');
+    console.error('  - soa2_123_getUserInfo.txt（需包含 [序号] Request/Response）');
     process.exit(1);
   }
 
@@ -705,8 +995,16 @@ async function executeMigration(scenarioName, targetFolder, rawFolderPath, rl = 
       const requestData = extractJsonFromFile(filePair.request);
       const responseData = extractJsonFromFile(filePair.response);
 
-      if (!requestData || !responseData) {
+      // 对于 GET 请求，requestData 可能是空对象 {}，这是有效的
+      // 只有 responseData 是必需的
+      if (requestData === null || responseData === null) {
         console.warn(`警告: 序号 ${index} 的数据提取失败，跳过`);
+        if (requestData === null) {
+          console.warn(`  请求数据提取失败: ${filePair.request}`);
+        }
+        if (responseData === null) {
+          console.warn(`  响应数据提取失败: ${filePair.response}`);
+        }
         continue;
       }
 

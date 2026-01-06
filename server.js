@@ -160,12 +160,24 @@ function loadMockConfig() {
       configPath = path.join(workDir, 'proxy.config.json');
     }
     
+    // 确保路径是绝对路径
+    if (!path.isAbsolute(configPath)) {
+      configPath = path.resolve(configPath);
+    }
+    
     if (fs.existsSync(configPath)) {
       const configContent = fs.readFileSync(configPath, 'utf-8');
       mockConfig = JSON.parse(configContent);
+      console.log(`✅ 已加载配置文件: ${configPath}`);
       return mockConfig;
     } else {
       console.warn(`配置文件不存在: ${configPath}`);
+      if (process.env.CONFIG_PATH) {
+        console.warn(`  CONFIG_PATH 环境变量: ${process.env.CONFIG_PATH}`);
+      }
+      if (process.env.WORK_DIR) {
+        console.warn(`  WORK_DIR 环境变量: ${process.env.WORK_DIR}`);
+      }
       return null;
     }
   } catch (error) {
@@ -473,7 +485,10 @@ async function handleRequest(req, res) {
 
 
     // 检查是否匹配失败
-    if (result && result.body && result.body.error) {
+    // matchResponse 返回错误时的格式：{ error: true, message: '...', ... }
+    // 需要检查 error 是否为布尔值 true，而不是仅仅检查 error 字段是否存在
+    // 因为响应数据中可能包含 error 字段（如 { error: { code: '', message: '' } }）
+    if (result && result.body && result.body.error === true) {
       console.log(`${getTimestamp()} ${colors.red}❌ ${actualInterfaceName} 匹配失败${colors.reset}`);
       return res.status(404).json(result.body);
     }

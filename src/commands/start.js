@@ -39,10 +39,10 @@ function findProjectRoot() {
 function isRawFolder(pathStr) {
   if (!pathStr) return false;
   
-  // 检查是否是绝对路径或相对路径
+  // 使用 path.resolve 规范化路径（处理 ./ 和 ../ 等相对路径）
   const fullPath = path.isAbsolute(pathStr) 
-    ? pathStr 
-    : path.join(process.cwd(), pathStr);
+    ? path.resolve(pathStr)
+    : path.resolve(process.cwd(), pathStr);
   
   // 检查路径是否存在且是目录
   if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) {
@@ -75,78 +75,145 @@ function findDefaultRawFolder() {
 }
 
 /**
+ * 检查 Raw 文件夹下是否已有生成的文件
+ */
+function checkRawFolderFiles(rawFolderPath) {
+  const baseDataPath = path.join(rawFolderPath, 'base-data');
+  const mocksPath = path.join(rawFolderPath, 'mocks');
+  const configPath = path.join(rawFolderPath, 'proxy.config.json');
+  
+  return {
+    hasBaseData: fs.existsSync(baseDataPath) && fs.statSync(baseDataPath).isDirectory(),
+    hasMocks: fs.existsSync(mocksPath) && fs.statSync(mocksPath).isDirectory(),
+    hasConfig: fs.existsSync(configPath),
+    allExist: fs.existsSync(baseDataPath) && fs.existsSync(mocksPath) && fs.existsSync(configPath)
+  };
+}
+
+/**
  * start 命令主函数
  */
 async function startCommand(mockIdOrPath, options) {
   let finalMockId = mockIdOrPath;
+  let workDir = process.cwd(); // 默认工作目录
   
   // 检查是否是 Raw 文件夹路径
   if (isRawFolder(mockIdOrPath)) {
-    console.log('🔍 检测到 Raw 文件夹，将自动转换后启动...');
-    
+    // 规范化路径，确保正确处理相对路径（包括 ./ 开头的路径）
     const rawFolderPath = path.isAbsolute(mockIdOrPath)
-      ? mockIdOrPath
-      : path.join(process.cwd(), mockIdOrPath);
+      ? path.resolve(mockIdOrPath)
+      : path.resolve(process.cwd(), mockIdOrPath);
     
-    // 如果设置了 --no-migrate，直接报错
-    if (options.noMigrate) {
-      console.error('错误: 指定了 --no-migrate，但提供的是 Raw 文件夹路径');
-      console.error('提示: 请先使用 jacky-proxy migrate 命令转换，或移除 --no-migrate 参数');
-      process.exit(1);
-    }
+    // 检查 Raw 文件夹下是否已有生成的文件
+    const filesCheck = checkRawFolderFiles(rawFolderPath);
     
-    // 执行迁移
-    const migrateCommand = require('./migrate');
-    const scenarioName = options.scenario || '场景1';
-    const targetFolder = options.target || 'mocks/test-folder';
-    const ignoreInterfaces = options.ignore
-      ? options.ignore.split(',').map(s => s.trim()).filter(s => s)
-      : [];
-    
-    console.log('');
-    console.log('═══════════════════════════════════════════════════════');
-    console.log('  自动迁移 Raw 文件夹');
-    console.log('═══════════════════════════════════════════════════════');
-    console.log(`场景名称: ${scenarioName}`);
-    console.log(`目标文件夹: ${targetFolder}`);
-    console.log(`Raw 文件夹: ${rawFolderPath}`);
-    if (ignoreInterfaces.length > 0) {
-      console.log(`忽略接口: ${ignoreInterfaces.join(', ')}`);
-    }
-    console.log('');
-    
-    // 调用迁移命令（非交互式）
-    const migrateOptions = {
-      scenario: scenarioName,
-      target: targetFolder,
-      raw: rawFolderPath,
-      ignore: options.ignore || '',
-      interactive: false
-    };
-    
-    try {
-      await migrateCommand(migrateOptions);
+    if (filesCheck.allExist) {
+      // 文件已存在，直接启动
+      console.log('🔍 检测到 Raw 文件夹，且已存在生成的文件，直接启动...');
+      console.log(`  base-data: ${filesCheck.hasBaseData ? '✓' : '✗'}`);
+      console.log(`  mocks: ${filesCheck.hasMocks ? '✓' : '✗'}`);
+      console.log(`  proxy.config.json: ${filesCheck.hasConfig ? '✓' : '✗'}`);
+      console.log('');
       
-      // 从配置文件中读取新创建的 mock-id（配置文件在工作目录）
-      const workDir = process.cwd();
-      const configPath = path.join(workDir, options.config || 'proxy.config.json');
+      // 从 Raw 文件夹下的配置文件中读取 mock-id
+      const configPath = path.join(rawFolderPath, options.config || 'proxy.config.json');
       if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        const folder = config.folders.list.find(f => f.path === targetFolder);
-        if (folder) {
-          finalMockId = String(folder.id);
-          console.log(`\n✅ 迁移完成，将使用场景 ID: ${finalMockId}`);
-        } else {
-          console.warn('警告: 无法在配置文件中找到新创建的场景，使用默认 ID: 1');
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          // 获取第一个场景的 ID，或者使用默认值
+          if (config.folders && config.folders.list && config.folders.list.length > 0) {
+            finalMockId = String(config.folders.list[0].id);
+            console.log(`✅ 从配置文件读取场景 ID: ${finalMockId}`);
+          } else {
+            console.warn('警告: 配置文件中没有场景配置，使用默认 ID: 1');
+            finalMockId = '1';
+          }
+        } catch (error) {
+          console.warn(`警告: 读取配置文件失败: ${error.message}，使用默认 ID: 1`);
           finalMockId = '1';
         }
       } else {
         console.warn('警告: 配置文件不存在，使用默认 ID: 1');
         finalMockId = '1';
       }
-    } catch (error) {
-      console.error('迁移失败:', error.message);
-      process.exit(1);
+      
+      // 设置工作目录为 Raw 文件夹
+      workDir = rawFolderPath;
+    } else {
+      // 文件不存在，需要生成
+      console.log('🔍 检测到 Raw 文件夹，将自动转换后启动...');
+      
+      // 如果设置了 --no-migrate，直接报错
+      if (options.noMigrate) {
+        console.error('错误: 指定了 --no-migrate，但 Raw 文件夹下还没有生成的文件');
+        console.error('提示: 请先使用 jacky-proxy migrate 命令转换，或移除 --no-migrate 参数');
+        process.exit(1);
+      }
+      
+      // 保存原始工作目录
+      const originalCwd = process.cwd();
+      
+      try {
+        // 切换到 Raw 文件夹目录，这样 migrate 会在 Raw 文件夹下创建文件
+        process.chdir(rawFolderPath);
+        
+        // 执行迁移
+        const migrateCommand = require('./migrate');
+        const scenarioName = options.scenario || '默认场景';
+        const targetFolder = options.target || 'mocks/test-folder';
+        const ignoreInterfaces = options.ignore
+          ? options.ignore.split(',').map(s => s.trim()).filter(s => s)
+          : [];
+        
+        console.log('');
+        console.log('═══════════════════════════════════════════════════════');
+        console.log('  自动迁移 Raw 文件夹');
+        console.log('═══════════════════════════════════════════════════════');
+        console.log(`场景名称: ${scenarioName}`);
+        console.log(`目标文件夹: ${targetFolder}`);
+        console.log(`Raw 文件夹: ${rawFolderPath}`);
+        if (ignoreInterfaces.length > 0) {
+          console.log(`忽略接口: ${ignoreInterfaces.join(', ')}`);
+        }
+        console.log('');
+        
+        // 调用迁移命令（非交互式）
+        // 注意：raw 参数应该是相对于当前工作目录的路径，或者使用绝对路径
+        const migrateOptions = {
+          scenario: scenarioName,
+          target: targetFolder,
+          raw: rawFolderPath, // 使用绝对路径
+          ignore: options.ignore || '',
+          interactive: false
+        };
+        
+        await migrateCommand(migrateOptions);
+        
+        // 从配置文件中读取新创建的 mock-id（配置文件在 Raw 文件夹下）
+        const configPath = path.join(rawFolderPath, options.config || 'proxy.config.json');
+        if (fs.existsSync(configPath)) {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          const folder = config.folders.list.find(f => f.path === targetFolder);
+          if (folder) {
+            finalMockId = String(folder.id);
+            console.log(`\n✅ 迁移完成，将使用场景 ID: ${finalMockId}`);
+          } else {
+            console.warn('警告: 无法在配置文件中找到新创建的场景，使用默认 ID: 1');
+            finalMockId = '1';
+          }
+        } else {
+          console.warn('警告: 配置文件不存在，使用默认 ID: 1');
+          finalMockId = '1';
+        }
+        
+        // 设置工作目录为 Raw 文件夹
+        workDir = rawFolderPath;
+      } catch (error) {
+        // 恢复原始工作目录
+        process.chdir(originalCwd);
+        console.error('迁移失败:', error.message);
+        process.exit(1);
+      }
     }
   } else {
     // 检查是否是数字（mock-id）
@@ -158,12 +225,22 @@ async function startCommand(mockIdOrPath, options) {
   }
   
   // 设置环境变量
-  const workDir = process.cwd(); // 保存当前工作目录
   process.env.MOCK_ID = finalMockId;
   process.env.PORT = options.port || '5001';
-  process.env.WORK_DIR = workDir; // 设置工作目录环境变量
-  process.env.CONFIG_PATH = path.join(workDir, options.config || 'proxy.config.json');
+  // 确保 workDir 是绝对路径
+  const absoluteWorkDir = path.isAbsolute(workDir) ? workDir : path.resolve(workDir);
+  process.env.WORK_DIR = absoluteWorkDir; // 设置工作目录环境变量（可能是 Raw 文件夹）
+  // 确保 CONFIG_PATH 是绝对路径
+  const configFileName = options.config || 'proxy.config.json';
+  const configPath = path.isAbsolute(configFileName) 
+    ? configFileName 
+    : path.join(absoluteWorkDir, configFileName);
+  process.env.CONFIG_PATH = path.resolve(configPath); // 确保是绝对路径
   process.env.DEBUG = options.debug ? 'true' : 'false'; // 设置 Debug 模式
+  
+  // 调试信息
+  console.log(`📁 工作目录: ${process.env.WORK_DIR}`);
+  console.log(`📄 配置文件: ${process.env.CONFIG_PATH}`);
 
   console.log('');
   console.log('═══════════════════════════════════════════════════════');
