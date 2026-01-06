@@ -1,6 +1,6 @@
 {
   "name": "jacky-proxy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "通用 Mock 服务器 - 适用于任意网站的 HTTP 请求拦截和 Mock 响应系统",
   "main": "server.js",
   "bin": {
