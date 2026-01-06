@@ -6,6 +6,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const chokidar = require('chokidar');
 
 // 使用 ts-node 支持 TypeScript 文件
 require('ts-node').register({
@@ -302,6 +303,204 @@ let mockScenarios = {};
 // 格式: Set(['getProductInfo', 'productSearch']) 表示这些接口被禁用
 let disabledInterfaces = new Set();
 
+// 文件监听器
+let fileWatcher = null;
+
+/**
+ * 清除模块及其所有依赖的缓存
+ */
+function clearModuleCache(modulePath) {
+  const resolvedPath = require.resolve(modulePath);
+  
+  // 清除该模块的缓存
+  if (require.cache[resolvedPath]) {
+    const module = require.cache[resolvedPath];
+    
+    // 递归清除所有子模块的缓存
+    if (module.children) {
+      module.children.forEach(child => {
+        if (child.filename && (child.filename.endsWith('.json') || child.filename.includes('base-data'))) {
+          delete require.cache[child.filename];
+        }
+      });
+    }
+    
+    delete require.cache[resolvedPath];
+  }
+}
+
+/**
+ * 清除 base-data 目录下所有 JSON 文件的缓存
+ */
+function clearBaseDataCache(interfaceName) {
+  const workDir = getWorkDir();
+  const baseDataDir = path.join(workDir, 'base-data', interfaceName);
+  
+  if (fs.existsSync(baseDataDir)) {
+    const files = fs.readdirSync(baseDataDir);
+    files.forEach(file => {
+      if (file.endsWith('.json')) {
+        const jsonPath = path.join(baseDataDir, file);
+        try {
+          const resolvedPath = require.resolve(jsonPath);
+          delete require.cache[resolvedPath];
+        } catch (e) {
+          // 如果文件还未被 require，忽略错误
+        }
+      }
+    });
+  }
+}
+
+/**
+ * 重新加载单个 Mock 文件
+ */
+function reloadMockFile(filePath, interfaceName) {
+  try {
+    // 清除 base-data 中该接口的所有 JSON 文件缓存
+    clearBaseDataCache(interfaceName);
+    
+    // 清除 Mock 文件及其所有依赖的缓存
+    clearModuleCache(filePath);
+    
+    // 清除 ts-node 的编译缓存（如果存在）
+    if (require.extensions['.ts']) {
+      // ts-node 可能会缓存编译结果，清除相关缓存
+      const tsNodeCache = require.cache;
+      Object.keys(tsNodeCache).forEach(key => {
+        if (key.includes(filePath) || key.includes(interfaceName)) {
+          delete tsNodeCache[key];
+        }
+      });
+    }
+    
+    // 重新加载
+    const mockModule = require(filePath);
+    const mockHandler = mockModule.default || mockModule;
+    
+    if (typeof mockHandler === 'function') {
+      cachedMockFiles[interfaceName] = mockHandler;
+      mockFilePaths[interfaceName] = filePath;
+      console.log(`${colors.green}🔄${colors.reset} ${colors.dim}热更新 Mock 文件:${colors.reset} ${colors.cyan}${path.basename(filePath)}${colors.reset} ${colors.gray}->${colors.reset} ${colors.bright}${interfaceName}${colors.reset}`);
+      return true;
+    } else {
+      console.warn(`${colors.yellow}⚠${colors.reset} ${colors.yellow}Mock 文件 ${colors.cyan}${path.basename(filePath)}${colors.yellow} 未导出函数${colors.reset}`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`${colors.red}✗${colors.reset} ${colors.red}热更新 Mock 文件失败:${colors.reset} ${colors.cyan}${path.basename(filePath)}${colors.reset} ${colors.red}${error.message}${colors.reset}`);
+    if (error.stack) {
+      console.error(error.stack);
+    }
+    return false;
+  }
+}
+
+/**
+ * 重新加载所有 Mock 文件（当 base-data 变化时）
+ */
+function reloadAllMockFiles() {
+  if (!cachedMockId) return;
+  
+  const folderPath = getMockFolderPath(cachedMockId);
+  if (!folderPath) return;
+  
+  console.log(`\n${colors.blue}🔄${colors.reset} ${colors.bright}热更新所有 Mock 文件...${colors.reset}`);
+  cachedMockFiles = loadMockFiles(folderPath);
+  console.log(`${colors.green}✅${colors.reset} ${colors.bright}热更新完成，共 ${colors.green}${Object.keys(cachedMockFiles).length}${colors.reset} ${colors.bright}个 Mock 接口${colors.reset}\n`);
+}
+
+/**
+ * 设置文件监听
+ */
+function setupFileWatcher(mockId) {
+  // 清除旧的监听器
+  if (fileWatcher) {
+    fileWatcher.close();
+    fileWatcher = null;
+  }
+  
+  const folderPath = getMockFolderPath(mockId);
+  if (!folderPath) return;
+  
+  const workDir = getWorkDir();
+  const baseDataPath = path.join(workDir, 'base-data');
+  const mocksPath = folderPath;
+  
+  // 要监听的路径
+  const watchPaths = [];
+  if (fs.existsSync(baseDataPath)) {
+    watchPaths.push(baseDataPath);
+  }
+  if (fs.existsSync(mocksPath)) {
+    watchPaths.push(mocksPath);
+  }
+  
+  if (watchPaths.length === 0) return;
+  
+  // 使用 chokidar 监听文件变化
+  fileWatcher = chokidar.watch(watchPaths, {
+    ignored: /(^|[\/\\])\../, // 忽略隐藏文件
+    persistent: true,
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 200,
+      pollInterval: 100
+    }
+  });
+  
+  fileWatcher
+    .on('change', (filePath) => {
+      // 延迟处理，避免文件写入未完成
+      setTimeout(() => {
+        const ext = path.extname(filePath);
+        const fileName = path.basename(filePath);
+        
+        // 如果是 Mock 文件变化
+        if (filePath.endsWith('.mock.ts') || filePath.endsWith('.mock.js')) {
+          const interfaceName = fileName.replace(/\.mock\.(ts|js)$/, '');
+          reloadMockFile(filePath, interfaceName);
+        }
+        // 如果是 base-data 中的 JSON 文件变化
+        else if (ext === '.json' && filePath.includes('base-data')) {
+          // 找到对应的接口名（从路径中提取）
+          const baseDataMatch = filePath.match(/base-data[\/\\]([^\/\\]+)/);
+          if (baseDataMatch) {
+            const interfaceName = baseDataMatch[1];
+            
+            // 先清除该 JSON 文件的缓存
+            try {
+              const resolvedPath = require.resolve(filePath);
+              delete require.cache[resolvedPath];
+            } catch (e) {
+              // 如果文件还未被 require，忽略错误
+            }
+            
+            // 清除该接口的所有 base-data 缓存
+            clearBaseDataCache(interfaceName);
+            
+            // 重新加载该接口的 Mock 文件（因为 Mock 文件会 import base-data）
+            const mockFilePath = path.join(mocksPath, `${interfaceName}.mock.ts`);
+            if (fs.existsSync(mockFilePath)) {
+              reloadMockFile(mockFilePath, interfaceName);
+            } else {
+              // 如果找不到对应的 Mock 文件，重新加载所有（以防有依赖关系）
+              reloadAllMockFiles();
+            }
+          } else {
+            // 无法确定接口名，重新加载所有
+            reloadAllMockFiles();
+          }
+        }
+      }, 100);
+    })
+    .on('error', (error) => {
+      console.error(`${colors.red}✗${colors.reset} ${colors.red}文件监听错误:${colors.reset} ${error.message}`);
+    });
+  
+  console.log(`${colors.blue}👁️${colors.reset} ${colors.dim}已启用文件热更新监听${colors.reset}`);
+}
+
 /**
  * 获取或加载 Mock 文件
  */
@@ -321,6 +520,10 @@ function getMockFiles(mockId) {
   cachedMockId = mockId;
 
   console.log(`${colors.green}✅${colors.reset} ${colors.bright}共加载 ${colors.green}${Object.keys(cachedMockFiles).length}${colors.reset} ${colors.bright}个 Mock 接口${colors.reset}\n`);
+  
+  // 设置文件监听
+  setupFileWatcher(mockId);
+  
   return cachedMockFiles;
 }
 
